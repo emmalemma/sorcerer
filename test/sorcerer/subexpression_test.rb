@@ -5,12 +5,18 @@ require 'pp'
 
 class SubexpressionTest < Test::Unit::TestCase
   def assert_subexpressions code, subexpressions, debug=false
-    sexp = Ripper::SexpBuilder.new(code).parse
-    if debug
-      pp sexp
+    [true, false].each do |quick|
+      sexp = if quick
+          Ripper.sexp code
+        else
+          Ripper::SexpBuilder.new(code).parse
+        end
+      if debug
+        pp sexp
+      end
+      subs = Sorcerer.subexpressions(sexp)
+      assert_equal subexpressions, subs
     end
-    subs = Sorcerer.subexpressions(sexp)
-    assert_equal subexpressions, subs
   end
 
   def test_simple

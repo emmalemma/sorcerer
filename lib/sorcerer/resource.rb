@@ -66,7 +66,7 @@ module Sorcerer
     end
 
     def sexp?(obj)
-      obj && obj.respond_to?(:each) && obj.first.is_a?(Symbol)
+      obj && obj.respond_to?(:each) && (obj.first.is_a?(Symbol) || obj.first.is_a?(Array) || obj == [])
     end
 
     def nested_sexp?(obj)
@@ -75,7 +75,7 @@ module Sorcerer
 
     def resource(sexp)
       fail NotSexpError, "Not an S-EXPER: #{sexp.inspect}" unless sexp?(sexp)
-      handler = HANDLERS[sexp.first]
+      handler = HANDLERS[sexp.first] || HANDLERS[sexp.class]
       raise NoHandlerError.new(sexp.first) unless handler
       if @debug
         puts "----------------------------------------------------------"
@@ -194,15 +194,21 @@ module Sorcerer
 
     VOID_STATEMENT = [:stmts_add, [:stmts_new], [:void_stmt]]
     VOID_STATEMENT2 = [:stmts_add, [:stmts_new]]
+    VOID_STATEMENT3 = [[:void_stmt]]
+    VOID_STATEMENT4 = [:void_stmt]
     VOID_BODY = [:body_stmt, VOID_STATEMENT, nil, nil, nil]
     VOID_BODY2 = [:bodystmt, VOID_STATEMENT, nil, nil, nil]
+    VOID_BODY3 = [:bodystmt, VOID_STATEMENT3, nil, nil, nil]
 
     def void?(sexp)
-      sexp.nil? ||
+      sexp.nil? || sexp == [] ||
         sexp == VOID_STATEMENT ||
         sexp == VOID_STATEMENT2 ||
+        sexp == VOID_STATEMENT3 ||
+        sexp == VOID_STATEMENT4 ||
         sexp == VOID_BODY ||
-        sexp == VOID_BODY2
+        sexp == VOID_BODY2 ||
+        sexp == VOID_BODY3
     end
 
     def label?(sexp)
@@ -252,6 +258,17 @@ module Sorcerer
       [first_delim, end_delim]
     end
 
+    def array_with_commas(sexp)
+      if sexp[0].is_a?(Array)
+        sexp.each_with_index do |statement, i|
+          resource(statement)
+          emit(", ") unless i == sexp.length - 1
+        end
+      else
+        resource(sexp)
+      end
+    end
+
     NYI = lambda { |sexp| nyi(sexp) }
     DBG = lambda { |sexp| pp(sexp) }
     NOOP = lambda { |sexp| }
@@ -266,8 +283,17 @@ module Sorcerer
       (RUBY_VERSION == '1.9.2' && RUBY_PATCHLEVEL < 320)
 
     HANDLERS = {
+      # class handlers
+      Array => lambda { |sexp|
+        # Assume an array of arrays
+        sexp.each_with_index do |statement, i|
+          unless void?(statement)
+            resource(statement)
+            newline unless i == sexp.length - 1
+          end
+        end
+      },
       # parser keywords
-
       :BEGIN => lambda { |sexp|
         emit("BEGIN {")
         if void?(sexp[1])
@@ -320,14 +346,14 @@ module Sorcerer
         emit(")")
       },
       :args_add => lambda { |sexp|
-        resource(sexp[1])
+        array_with_commas(sexp[1])
         if sexp[1].first != :args_new
           emit(", ")
         end
         resource(sexp[2])
       },
       :args_add_block => lambda { |sexp|
-        resource(sexp[1])
+        array_with_commas(sexp[1])
         if sexp[2]
           if sexp[1].first != :args_new
             emit(", ")
@@ -339,7 +365,7 @@ module Sorcerer
         end
       },
       :args_add_star => lambda { |sexp|
-        resource(sexp[1])
+        array_with_commas(sexp[1])
         if sexp[1].first != :args_new
           emit(", ")
         end
@@ -355,7 +381,7 @@ module Sorcerer
           resource(sexp[1])
         else
           emit("[")
-          resource(sexp[1]) if sexp[1]
+          array_with_commas(sexp[1]) if sexp[1]
           emit("]")
         end
       },
@@ -429,7 +455,7 @@ module Sorcerer
       },
       :break => lambda { |sexp|
         emit("break")
-        emit(" ") unless sexp[1] == [:args_new]
+        emit(" ") unless void?(sexp[1]) || sexp[1] == [:args_new]
         resource(sexp[1])
       },
       :call => lambda { |sexp|
@@ -670,7 +696,15 @@ module Sorcerer
         resource(sexp[2])
       },
       :mrhs_new => NOOP,
-      :mrhs_new_from_args => PASS1,
+      :mrhs_new_from_args => lambda { |sexp|
+        if sexp[1][0].is_a?(Array)
+          resource(sexp[1])
+          emit(", ")
+          resource(sexp[2])
+        else
+          resource(sexp[1])
+        end
+      },
       :next => lambda { |sexp|
         emit("next")
       },
@@ -715,8 +749,10 @@ module Sorcerer
           else
             resource(sexp[1].first)
           end
-          emit(" => ")
-          resource(sexp[2])
+          if sexp[2]
+            emit(" => ")
+            resource(sexp[2])
+          end
         end
         newline
         if sexp[3] && ! void?(sexp[3])
@@ -768,7 +804,9 @@ module Sorcerer
         emit(" ")
         resource(sexp[2])
       },
-      :string_content => NOOP,
+      :string_content => lambda { |sexp|
+        resource(sexp[1]) if sexp[1]
+      },
       :string_dvar => NYI,
       :string_embexpr => lambda { |sexp|
         emit('#{')

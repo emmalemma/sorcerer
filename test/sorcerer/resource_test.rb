@@ -19,6 +19,9 @@ class SourcerTest < Test::Unit::TestCase
   # * multi-line
   # * indentation
   #
+  # Test Ripper's full output, as well as the simplified sexps returned
+  # by `Ripper.sexp`.
+  #
   # Special markup is supported in the string to indicate different
   # expected output.  The string is expressed in single line mode with
   # the following interpretation:
@@ -33,21 +36,25 @@ class SourcerTest < Test::Unit::TestCase
   # string in single line and multi-line modes.
   #
   def assert_resource_lines(string, options={})
-    assert_resource_for_mode(
-      string,
-      options.merge(multiline: false)) { |s|
-      for_single_line(s)
-    }
-    assert_resource_for_mode(
-      string,
-      options.merge(multiline: true)) { |s|
-      for_multi_line(s)
-    }
-    assert_resource_for_mode(
-      string,
-      options.merge(indent: true)) { |s|
-      for_indented(s)
-    }
+    [true, false].each do |quick|
+      options[:quick] = quick
+      
+      assert_resource_for_mode(
+        string,
+        options.merge(multiline: false)) { |s|
+        for_single_line(s)
+      }
+      assert_resource_for_mode(
+        string,
+        options.merge(multiline: true)) { |s|
+        for_multi_line(s)
+      }
+      assert_resource_for_mode(
+        string,
+        options.merge(indent: true)) { |s|
+        for_indented(s)
+      }
+    end
   end
 
   # Assert the string is correctly resourced given the options and the
